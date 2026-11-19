@@ -821,6 +821,17 @@ h1, .display { font-family: var(--display); font-weight: 400; letter-spacing: -0
 }
 .admin-actions .danger { border-color: var(--red); color: var(--red); }
 .admin-help { margin-top: 16px; font-size: 15px; color: var(--ink-sub); }
+.admin-box { max-height: 92vh; overflow-y: auto; }
+.admin-box tr.q td { padding: 2px 4px; font-size: 15px; }
+
+/* ---------- idle reset notice ---------- */
+.idle-notice {
+  position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 6;
+  padding: 10px 26px; border-radius: 12px; border: 3px solid var(--ink); background: var(--board);
+  font-size: 24px; font-weight: 700; color: var(--ink); white-space: nowrap;
+  display: none; pointer-events: none;
+}
+.idle-notice.show { display: block; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -872,7 +883,7 @@ h1, .display { font-family: var(--display); font-weight: 400; letter-spacing: -0
           <p class="intro-body">분명 다 읽을 수 있는 한글 문장이에요.<br>그런데 뜻도 알 수 있을까요?</p>
           <div class="intro-rules">
             <span class="rule">문장을 읽고 알맞은 뜻을 골라 주세요</span>
-            <span class="rule">문제마다 8초가 주어져요</span>
+            <span class="rule">8초 막대가 있지만 넘어도 괜찮아요</span>
             <span class="rule" id="intro1-count"></span>
           </div>
           <div class="intro-actions"><button class="btn" data-go="mc">시작하기</button></div>
@@ -889,7 +900,7 @@ h1, .display { font-family: var(--display); font-weight: 400; letter-spacing: -0
         <div class="timer" id="mc-timer" data-hint="mc-hint">
           <div class="timer-track"><div class="timer-fill"></div></div>
         </div>
-        <p class="mc-ask">Q. 이 문장은 무슨 뜻일까요?</p>
+        <p class="mc-ask" id="mc-ask">Q. 이 문장은 무슨 뜻일까요?</p>
         <div class="sign mc-sentence" id="mc-sentence"></div>
         <div class="mc-options" id="mc-options"></div>
         <div class="mc-answer-row">
@@ -911,7 +922,7 @@ h1, .display { font-family: var(--display); font-weight: 400; letter-spacing: -0
           <p class="intro-body">문자 한 통이 진짜인지 판단하는 일이 어려운 분들이 있어요.<br>오늘 내 휴대폰에 문자가 왔어요.</p>
           <div class="intro-rules">
             <span class="rule">믿어도 되면 O, 의심스러우면 X</span>
-            <span class="rule">문제마다 8초가 주어져요</span>
+            <span class="rule">8초 막대가 있지만 넘어도 괜찮아요</span>
             <span class="rule">총 2문제</span>
           </div>
           <div class="intro-actions"><button class="btn" data-go="sms">시작하기</button></div>
@@ -989,6 +1000,7 @@ h1, .display { font-family: var(--display); font-weight: 400; letter-spacing: -0
           <div class="actions"><button class="btn" data-go="restart">처음으로 돌아가기</button></div>
         </div>
       </section>
+      <div class="idle-notice" id="idle-notice" role="status" aria-live="polite">곧 처음 화면으로 돌아가요. 화면을 누르면 계속할 수 있어요</div>
     </div>
   </div>
 </div>
@@ -1015,7 +1027,7 @@ const DATA = {
   "timer_warning_seconds": 2,
   "timer_is_soft": true,
   "timeout_hint": "천천히 골라도 괜찮아요",
-  "idle_reset_seconds": 60,
+  "idle_reset_seconds": 90,
   "palette": {
     "orange": "#F99E53",
     "coral": "#FC6766",
@@ -1313,8 +1325,8 @@ const DATA = {
       "wedding": {
         "answer": "X",
         "sender": "010-0000-0000",
-        "ko": "[국제발신]\n♡저희 결혼합니다♡\n10.10(일요일) 오시기 힘드시겠지만 마음으로 축하해 주세요 Vo.la/9H4**",
-        "en": "[International]\n♡We're getting married♡\nSun, Oct 10. We know it may be hard to come, but please celebrate with us in your heart Vo.la/9H4**",
+        "ko": "[국제발신]\n♡저희 결혼합니다♡\n11.28(토) 오시기 힘드시겠지만 마음으로 축하해 주세요 Vo.la/9H4**",
+        "en": "[International]\n♡We're getting married♡\nSat, Nov 28. We know it may be hard to come, but please celebrate with us in your heart Vo.la/9H4**",
         "explanation_ko": "이름도 없이 링크만 있는 청첩장 사칭 문자예요. 한국어라서 \"누구 결혼이지?\" 하고 바로 의심할 수 있었죠?",
         "explanation_foreign": "이름도 없이 링크만 있는 청첩장 사칭 문자예요. 한국어였다면 \"누구 결혼이지?\" 하고 바로 의심했을 거예요."
       }
@@ -1362,6 +1374,7 @@ function newSession() {
   TOTAL = mc.length + 2;
   S = {
     started: new Date().toISOString(),
+    t0: performance.now(), saved: false,
     first: null, last: null,
     mc, mcIndex: 0,
     combo, smsIndex: 0,
@@ -1394,10 +1407,11 @@ document.querySelectorAll('#s-ox .ox-card').forEach((btn) => {
     if (oxBusy) return; oxBusy = true;
     btn.classList.add('picked');
     const v = btn.dataset.ox;
+    if (oxRound === 1) S.t0 = performance.now(); // duration starts at the first O/X answer
     setTimeout(() => {
       oxBusy = false;
       if (oxRound === 1) { S.first = v; show('s-bridge'); }
-      else { S.last = v; saveResult(); showClosing(); }
+      else { S.last = v; saveResult('completed', 's-close'); showClosing(); }
     }, reduceMotion ? 0 : 450);
   });
 });
@@ -1438,6 +1452,7 @@ function showMC() {
   renderDots($('mc-dots'), $('mc-count'), n);
   const isCia = q.level === 'cia';
   $('mc-stage').textContent = isCia ? DATA.stage1.cia_label : DATA.stage1.label;
+  $('mc-ask').textContent = (isCia && !/\s/.test(q.text.trim())) ? 'Q. 이 말은 무슨 뜻일까요?' : 'Q. 이 문장은 무슨 뜻일까요?';
   const sent = $('mc-sentence');
   sent.textContent = q.text;
   sent.classList.toggle('long', q.text.length > 12 && q.text.length <= 22);
@@ -1564,11 +1579,21 @@ document.addEventListener('click', (e) => {
   else if (to === 'restart') restart();
 });
 
-function restart() { newSession(); setIntroCount(); showOX(1); }
+function restart() { saveAbandoned(); newSession(); setIntroCount(); showOX(1); }
 
 /* ---------- results (localStorage) ---------- */
-function loadResults() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; } }
-function saveResult() {
+function loadResults() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+    return Array.isArray(rows) ? rows.filter((r) => r && typeof r === 'object') : [];
+  } catch { return []; }
+}
+function saveAbandoned() {
+  // a run that got past the first O/X but never reached the end
+  if (S && !S.saved && S.first !== null) saveResult('abandoned', current);
+}
+function saveResult(status, stageId) {
+  if (S.saved) return; S.saved = true;
   const rows = loadResults();
   rows.push({
     finished: new Date().toISOString(),
@@ -1577,14 +1602,24 @@ function saveResult() {
     in_time: S.results.filter((r) => r.inTime).length,
     combo: S.combo.id,
     questions: S.results.map((r) => `${r.id}:${r.correct ? 1 : 0}${r.inTime ? '' : '(late)'}`).join(' '),
+    status, stage: stageId,
+    duration_sec: Math.round((performance.now() - S.t0) / 1000),
+    q_correct: Object.fromEntries(S.results.map((r) => [r.id, r.correct])),
   });
   try { localStorage.setItem(STORE_KEY, JSON.stringify(rows)); } catch { /* storage unavailable: keep playing */ }
 }
 
 /* ---------- idle reset ---------- */
-let idleTimer = null;
+let idleTimer = null, idleWarnTimer = null;
+function hideIdleNotice() { $('idle-notice').classList.remove('show'); }
 function bumpIdle() {
-  clearTimeout(idleTimer);
+  clearTimeout(idleTimer); clearTimeout(idleWarnTimer);
+  hideIdleNotice();
+  const lead = Math.min(10, DATA.idle_reset_seconds / 2);
+  idleWarnTimer = setTimeout(() => {
+    if ($('admin').classList.contains('show') || (current === 's-ox' && oxRound === 1)) return;
+    $('idle-notice').classList.add('show');
+  }, (DATA.idle_reset_seconds - lead) * 1000);
   idleTimer = setTimeout(() => {
     if ($('admin').classList.contains('show')) return bumpIdle();
     if (!(current === 's-ox' && oxRound === 1)) restart();
@@ -1603,21 +1638,42 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---------- operator panel ---------- */
+function isCompleted(r) { return !r.status || r.status === 'completed'; }
+// [[questionId, correct], ...] from the structured field, or from the legacy "id:1(late) id:0" string
+function rowAnswers(r) {
+  if (r.q_correct && typeof r.q_correct === 'object') return Object.entries(r.q_correct).map(([id, ok]) => [id, !!ok]);
+  return String(r.questions || '').split(' ').map((t) => /^(.+):([01])(?:\(late\))?$/.exec(t)).filter(Boolean).map((m) => [m[1], m[2] === '1']);
+}
 function openAdmin() {
-  const rows = loadResults();
+  hideIdleNotice();
+  const all = loadResults();
+  const rows = all.filter(isCompleted); // legacy rows (no status) count as completed
   const n = rows.length;
-  const pct = (c) => (n ? Math.round((c / n) * 100) : 0) + '%';
+  const pct = (c, d = n) => (d ? Math.round((c / d) * 100) : 0) + '%';
   const firstO = rows.filter((r) => r.first === 'O').length;
   const lastO = rows.filter((r) => r.last === 'O').length;
   const changed = rows.filter((r) => r.first !== r.last).length;
-  const avg = n ? (rows.reduce((a, r) => a + r.score, 0) / n).toFixed(2) : '0';
+  const avg = n ? (rows.reduce((a, r) => a + (Number(r.score) || 0), 0) / n).toFixed(2) : '0';
+  const durs = rows.map((r) => r.duration_sec).filter((v) => typeof v === 'number' && isFinite(v));
+  const avgDur = durs.length ? Math.round(durs.reduce((a, v) => a + v, 0) / durs.length) + '초' : '-';
+  const perRow = rows.map((r) => rowAnswers(r).length || TOTAL);
+  const answered = perRow.reduce((a, v) => a + v, 0);
+  const inTime = rows.reduce((a, r, i) => a + Math.min(Number(r.in_time) || 0, perRow[i]), 0);
+  const perQ = {};
+  all.forEach((r) => rowAnswers(r).forEach(([id, ok]) => { const s = perQ[id] || (perQ[id] = { ok: 0, n: 0 }); s.n += 1; if (ok) s.ok += 1; }));
+  const qRows = Object.keys(perQ).sort().map((id) => `<tr class="q"><td>${escapeHtml(id)}</td><td>${perQ[id].ok}/${perQ[id].n} (${pct(perQ[id].ok, perQ[id].n)})</td></tr>`);
   $('admin-stats').innerHTML = [
+    ['시작한 체험 수', all.length],
     ['완료한 체험 수', n],
+    ['완료율', pct(n, all.length)],
+    ['평균 소요 시간 (완료 기준)', avgDur],
     ['처음 O 비율', `${firstO}명 (${pct(firstO)})`],
     ['마지막 O 비율', `${lastO}명 (${pct(lastO)})`],
     ['답을 바꾼 사람', `${changed}명 (${pct(changed)})`],
     [`평균 점수 (${TOTAL}점 만점)`, avg],
-  ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+    ['시간 안에 고른 비율', pct(inTime, answered)],
+    ['문제별 정답률', qRows.length ? '' : '-'],
+  ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).concat(qRows).join('');
   $('admin-clear').dataset.armed = '';
   $('admin-clear').textContent = '기록 지우기';
   $('admin').classList.add('show');
@@ -1630,8 +1686,8 @@ $('admin-full').addEventListener('click', () => {
   else if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
 });
 $('admin-csv').addEventListener('click', () => {
-  const rows = loadResults();
-  const head = ['finished', 'first', 'last', 'score', 'in_time', 'combo', 'questions'];
+  const rows = loadResults().map((r) => (r.status ? r : { ...r, status: 'completed' }));
+  const head = ['finished', 'first', 'last', 'score', 'in_time', 'combo', 'questions', 'status', 'stage', 'duration_sec'];
   const csv = [head.join(',')].concat(rows.map((r) => head.map((h) => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))).join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
@@ -1662,11 +1718,27 @@ $('mc-stage').textContent = DATA.stage1.label;
 function setIntroCount() { $('intro1-count').textContent = `총 ${S.mc.length}문제`; }
 $('sms-stage').textContent = DATA.stage2.label;
 
+/* ---------- keep the screen awake ---------- */
+let wakeLock = null;
+async function requestWake() {
+  try {
+    if (!navigator.wakeLock || document.visibilityState !== 'visible' || wakeLock) return;
+    const lock = await navigator.wakeLock.request('screen');
+    wakeLock = lock;
+    lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+  } catch { /* unsupported or refused: carry on */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestWake(); });
+document.addEventListener('pointerdown', requestWake, true);
+// closing or reloading the page mid-run also counts as leaving
+window.addEventListener('pagehide', () => { try { saveAbandoned(); } catch {} });
+
 /* ---------- start ---------- */
 newSession();
 setIntroCount();
 showOX(1);
 bumpIdle();
+requestWake();
 </script>
 </body>
 </html>
